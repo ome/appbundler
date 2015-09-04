@@ -1,6 +1,4 @@
-os: osx
-
-language: java
+language: objective-c
 
 install: brew install ant
 
