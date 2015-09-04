@@ -1,0 +1,9 @@
+language: java
+
+sudo: false
+
+addons:
+  apt_packages:
+    - ant
+    
+script: ant clean compile package
