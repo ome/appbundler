@@ -2,10 +2,6 @@ os: osx
 
 language: java
 
-sudo: false
+install: brew install ant
 
-addons:
-  apt_packages:
-    - ant
-    
 script: ant clean compile package
