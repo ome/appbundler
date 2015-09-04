@@ -16,6 +16,7 @@ with the following changes:
   the OSX special folders and whether the application is running in the
   sandbox (see below).
 - Allows overriding of passed JVM options by the bundled app itself via java.util.Preferences **(contributed by Hendrik Schreiber)**
+- Allows writing arbitrary key-value pairs to `Info.plist` via `plistentry`
 
 These are the environment variables passed to the JVM:
 
@@ -26,7 +27,7 @@ These are the environment variables passed to the JVM:
 - `SandboxEnabled` (the String `true` or `false`)
 
 
-Example:
+Example 1:
 
     <target name="bundle">
       <taskdef name="bundleapp" 
@@ -71,8 +72,11 @@ Example:
             isPackage="true">
           </bundledocument>
 
-          <!-- Workaround since the icon parameter for bundleapp doesn't work -->
-          <option value="-Xdock:icon=Contents/Resources/${bundle.icon}"/>
+          <!-- Define custom key-value pairs in Info.plist -->
+          <plistentry key="ABCCustomKey" value="foobar"/>
+
+          <!-- Workaround as com.apple.mrj.application.apple.menu.about.name property may no longer work -->
+          <option value="-Xdock:name=${bundle.name}"/>
 
           <option value="-Dapple.laf.useScreenMenuBar=true"/>
           <option value="-Dcom.apple.macos.use-file-dialog-packages=true"/>
@@ -84,3 +88,52 @@ Example:
           <option value="-Xmx1024M" name="Xmx"/>
       </bundleapp>
     </target>
+
+Example 2, use installed Java but require Java 8 (or later):
+
+    <target name="bundle">
+      <taskdef name="bundleapp" 
+        classpath="appbundler-1.0ea.jar"
+        classname="com.oracle.appbundler.AppBundlerTask"/>
+      <bundleapp 
+          jvmrequired="1.8"
+          classpathref="runclasspathref"
+          outputdirectory="${dist}"
+          name="${bundle.name}"
+          displayname="${bundle.displayname}"
+          executableName="MyApp"
+          identifier="com.company.product"
+          shortversion="${version.public}"
+          version="${version.internal}"
+          icon="${icons.path}/${bundle.icns}"
+          mainclassname="Main"
+          copyright="2012 Your Company"
+          applicationCategory="public.app-category.finance">
+      </bundleapp>
+    </target>
+
+Example 2, use installed Java but require Java 8 (or later) JRE and not a JDK:
+
+    <target name="bundle">
+      <taskdef name="bundleapp" 
+        classpath="appbundler-1.0ea.jar"
+        classname="com.oracle.appbundler.AppBundlerTask"/>
+      <bundleapp 
+          jvmrequired="1.8"
+          jrepreferred="true"
+          classpathref="runclasspathref"
+          outputdirectory="${dist}"
+          name="${bundle.name}"
+          displayname="${bundle.displayname}"
+          executableName="MyApp"
+          identifier="com.company.product"
+          shortversion="${version.public}"
+          version="${version.internal}"
+          icon="${icons.path}/${bundle.icns}"
+          mainclassname="Main"
+          copyright="2012 Your Company"
+          applicationCategory="public.app-category.finance">
+      </bundleapp>
+    </target>
+
+
