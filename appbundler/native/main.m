@@ -37,6 +37,9 @@
 #define JVM_DEFAULT_OPTIONS_KEY "JVMDefaultOptions"
 #define JVM_ARGUMENTS_KEY "JVMArguments"
 #define JVM_CLASSPATH_KEY "JVMClassPath"
+#define JVM_VERSION_KEY "JVMVersion"
+#define JRE_PREFERRED_KEY "JREPreferred"
+#define JDK_PREFERRED_KEY "JDKPreferred"
 #define JVM_DEBUG_KEY "JVMDebug"
 
 #define JVM_RUN_PRIVILEGED "JVMRunPrivileged"
@@ -44,6 +47,7 @@
 #define UNSPECIFIED_ERROR "An unknown error occurred."
 
 #define APP_ROOT_PREFIX "$APP_ROOT"
+#define JVM_RUNTIME "$JVM_RUNTIME"
 
 #define JRE_JAVA "/Library/Internet Plug-Ins/JavaAppletPlugin.plugin/Contents/Home/bin/java"
 #define JRE_DYLIB "/Library/Internet Plug-Ins/JavaAppletPlugin.plugin/Contents/Home/lib/jli/libjli.dylib"
@@ -65,9 +69,11 @@ static int progargc = 0;
 static int launchCount = 0;
 
 int launch(char *, int, char **);
-NSString * findDylib (bool);
-int extractMajorVersion (NSString *vstring)
-;NSString * convertRelativeFilePath(NSString * path);
+NSString * findJavaDylib (NSString *, bool, bool, bool);
+NSString * findJREDylib (int, bool);
+NSString * findJDKDylib (int, bool);
+int extractMajorVersion (NSString *);
+NSString * convertRelativeFilePath(NSString *);
 
 int main(int argc, char *argv[]) {
     NSAutoreleasePool *pool = [[NSAutoreleasePool alloc] init];
@@ -114,7 +120,7 @@ int launch(char *commandName, int progargc, char *progargv[]) {
     if (workingDir != nil) {
         workingDir = [workingDir stringByReplacingOccurrencesOfString:@APP_ROOT_PREFIX withString:[mainBundle bundlePath]];
     } else {
-        workingDir = NSHomeDirectory();
+        workingDir = [[NSFileManager defaultManager] currentDirectoryPath];
     }
     if (isDebugging) {
     	NSLog(@"Working Directory: '%@'", convertRelativeFilePath(workingDir));
@@ -136,20 +142,36 @@ int launch(char *commandName, int progargc, char *progargv[]) {
     
     // Locate the JLI_Launch() function
     NSString *runtime = [infoDictionary objectForKey:@JVM_RUNTIME_KEY];
-    
-    NSString *javaDylib;
     NSString *runtimePath = [[mainBundle builtInPlugInsPath] stringByAppendingPathComponent:runtime];
-    if (runtime != nil)
-    {
-        javaDylib = [runtimePath stringByAppendingPathComponent:@"Contents/Home/jre/lib/jli/libjli.dylib"];
+
+    NSString *jvmRequired = [infoDictionary objectForKey:@JVM_VERSION_KEY];
+    bool jrePreferred = [[infoDictionary objectForKey:@JRE_PREFERRED_KEY] boolValue];
+    bool jdkPreferred = [[infoDictionary objectForKey:@JDK_PREFERRED_KEY] boolValue];
+
+    if (jrePreferred && jdkPreferred) {
+        NSLog(@"Specifying both JRE- and JDK-preferred means neither is preferred");
+        jrePreferred = false;
+        jdkPreferred = false;
     }
-    else
-    {
-        javaDylib = findDylib (isDebugging);
+
+    NSString *javaDylib;
+
+    if (runtime != nil) {
+        NSString *dylibRelPath = [runtime hasSuffix:@".jdk"]
+                    ? @"Contents/Home/jre/lib/jli/libjli.dylib"
+                    : @"Contents/Home/lib/jli/libjli.dylib";
+        javaDylib = [runtimePath stringByAppendingPathComponent:dylibRelPath];
+
+        if (isDebugging) {
+            NSLog(@"Java Runtime Path (relative): '%@'", runtimePath);
+        }
     }
-    if (isDebugging) {
-        NSLog(@"Java Runtime Path (relative): '%@'", runtimePath);
-        NSLog(@"Java Runtime Dylib Path: '%@'", convertRelativeFilePath(javaDylib));
+    else {
+        javaDylib = findJavaDylib (jvmRequired, jrePreferred, jdkPreferred, isDebugging);
+
+        if (isDebugging) {
+            NSLog(@"Java Runtime Dylib Path: '%@'", convertRelativeFilePath(javaDylib));
+        }
     }
 
     const char *libjliPath = NULL;
@@ -166,9 +188,28 @@ int launch(char *commandName, int progargc, char *progargv[]) {
     }
 
     if (jli_LaunchFxnPtr == NULL) {
+        NSString *msg;
+
+        if (runtime == nil && jvmRequired != nil) {
+            int required = extractMajorVersion (jvmRequired);
+            
+            if (required < 7) { required = 7; }
+
+            if (jdkPreferred) {
+                NSString *msga = NSLocalizedString(@"JDKxLoadFullError", @UNSPECIFIED_ERROR);
+                msg = [NSString stringWithFormat:msga, required];
+            }
+            else {
+                NSString *msga = NSLocalizedString(@"JRExLoadFullError", @UNSPECIFIED_ERROR);
+                msg = [NSString stringWithFormat:msga, required];
+            }
+        }
+        else {
+            msg = NSLocalizedString(@"JRELoadError", @UNSPECIFIED_ERROR);
+        }
+
         [[NSException exceptionWithName:@JAVA_LAUNCH_ERROR
-            reason:NSLocalizedString(@"JRELoadError", @UNSPECIFIED_ERROR)
-            userInfo:nil] raise];
+                reason:msg userInfo:nil] raise];
     }
 
     // Get the main class name
@@ -318,6 +359,7 @@ int launch(char *commandName, int progargc, char *progargv[]) {
 
     for (NSString *option in options) {
         option = [option stringByReplacingOccurrencesOfString:@APP_ROOT_PREFIX withString:[mainBundle bundlePath]];
+        option = [option stringByReplacingOccurrencesOfString:@JVM_RUNTIME withString:runtimePath];
         argv[i++] = strdup([option UTF8String]);
     }
 
@@ -333,14 +375,16 @@ int launch(char *commandName, int progargc, char *progargv[]) {
         argv[i++] = strdup([argument UTF8String]);
     }
 
-	for (int ctr = 0; ctr < progargc; ctr++) {
+	int ctr = 0;
+	for (ctr = 0; ctr < progargc; ctr++) {
 		argv[i++] = progargv[ctr];
 	}
     
     // Print the full command line for debugging purposes...
     if (isDebugging) {
         NSLog(@"Command line passed to application:");
-        for( int j=0; j<i; j++) {
+        int j=0;
+        for(j=0; j<i; j++) {
             NSLog(@"Arg %d: '%s'", j, argv[j]);
         }
     }
@@ -362,15 +406,68 @@ int launch(char *commandName, int progargc, char *progargv[]) {
 }
 
 /**
- *  Searches for a JRE 1.7 or later dylib.
+ *  Searches for a JRE or JDK dylib of the specified version or later.
  *  First checks the "usual" JRE location, and failing that looks for a JDK.
+ *  The version required should be a string of form "1.X". If no version is
+ *  specified or the version is pre-1.7, then a Java 1.7 is sought.
  */
-NSString * findDylib (
+NSString * findJavaDylib (
+        NSString *jvmRequired,
+        bool jrePreferred,
+        bool jdkPreferred,
         bool isDebugging)
 {
-    if (isDebugging) { NSLog (@"Searching for a JRE."); }
+    int required = extractMajorVersion(jvmRequired);
+
+    if (required < 7) { required = 7; }
+
+    if (isDebugging) {
+        NSLog (@"Searching for a Java %d", required);
+    }
 
 //  Try the "java -version" command and see if we get a 1.7 or later response 
+//  (note that for unknown but ancient reasons, the result is output to stderr).
+//  If we do then return address for dylib that should be in the JRE package.
+    if (jdkPreferred) {
+        if (isDebugging) {
+            NSLog (@"A JDK is preferred; will not search for a JRE.");
+        }
+    }
+    else {
+        NSString * dylib = findJREDylib (required, isDebugging);
+
+        if (dylib != nil) { return dylib; }
+
+        if (isDebugging) { NSLog (@"No matching JRE found."); }
+    }
+
+//  Having failed to find a JRE in the usual location, see if a JDK is installed
+//  (probably in /Library/Java/JavaVirtualMachines). If so, return address of
+//  dylib in the JRE within the JDK.
+    if (jrePreferred) {
+        if (isDebugging) {
+            NSLog (@"A JRE is preferred; will not search for a JDK.");
+        }
+    }
+    else {
+        NSString * dylib = findJDKDylib (required, isDebugging);
+
+        return dylib;
+
+        if (isDebugging) { NSLog (@"No matching JDK found."); }
+    }
+
+    return nil;
+}
+
+/**
+ *  Searches for a JRE dylib of the specified version or later.
+ */
+NSString * findJREDylib (
+        int jvmRequired,
+        bool isDebugging)
+{
+//  Try the "java -version" command and see if we get a 1.7 or later response
 //  (note that for unknown but ancient reasons, the result is output to stderr).
 //  If we do then return address for dylib that should be in the JRE package.
     @try
@@ -425,7 +522,7 @@ NSString * findDylib (
                 }
             }
 
-            if ( version >= 7 ) {
+            if ( version >= jvmRequired ) {
                 if (isDebugging) {
                     NSLog (@"JRE version qualifies");
                 }
@@ -437,12 +534,15 @@ NSString * findDylib (
     {
         NSLog (@"JRE search exception: '%@'", [exception reason]);
     }
+}
 
-    if (isDebugging) { NSLog (@"Could not find a JRE. Will look for a JDK."); }
-
-//  Having failed to find a JRE in the usual location, see if a JDK is installed
-//  (probably in /Library/Java/JavaVirtualMachines). If so, return address of
-//  dylib in the JRE within the JDK.
+/**
+ *  Searches for a JDK dylib of the specified version or later.
+ */
+NSString * findJDKDylib (
+        int jvmRequired,
+        bool isDebugging)
+{
     @try
     {
         NSTask *task = [[NSTask alloc] init];
@@ -501,7 +601,7 @@ NSString * findDylib (
             }
         }
 
-        if ( version >= 7 ) {
+        if ( version >= jvmRequired ) {
             if (isDebugging) {
                 NSLog (@"JDK version qualifies");
             }
@@ -519,12 +619,14 @@ NSString * findDylib (
 
 /**
  *  Extract the Java major version number from a string. We expect the input
- *  to look like either either "1.X.Y_ZZ" or "jkd1.X.Y_ZZ", and the returned
- *  result will be the integral value of X. Any failure to parse the string
- *  will return 0.
+ *  to look like either either "1.X", "1.X.Y_ZZ" or "jkd1.X.Y_ZZ", and the 
+ *  returned result will be the integral value of X. Any failure to parse the
+ *  string will return 0.
  */
 int extractMajorVersion (NSString *vstring)
 {
+    if (vstring == nil) { return 0; }
+
 //  Expecting either a java version of form 1.X.Y_ZZ or jkd1.X.Y_ZZ.
 //  Strip off everything at start up to and including the "1."
     NSUInteger vstart = [vstring rangeOfString:@"1."].location;
@@ -533,10 +635,13 @@ int extractMajorVersion (NSString *vstring)
 
     vstring = [vstring substringFromIndex:(vstart+2)];
 
-//  Now find the dot after the major version number.
+//  Now find the dot after the major version number, if present.
     NSUInteger vdot = [vstring rangeOfString:@"."].location;
 
-    if (vdot == NSNotFound) { return 0; }
+//  No second dot, so return int of what we have.
+    if (vdot == NSNotFound) {
+        return [vstring intValue];
+    }
 
 //  Strip off everything beginning at that dot.
     vstring = [vstring substringToIndex:vdot];

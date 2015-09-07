@@ -69,6 +69,10 @@ questions.
             <isset property="env.JAVA_HOME"/>
         </condition>
 
+        <exec executable="xcrun" outputproperty="osx.sdk.dir">
+            <arg value="--show-sdk-path" />
+        </exec>
+
         <exec executable="${cc}" failonerror="true">
             <arg line="${arch64} ${arch32}"/>
             <arg value="-I"/>
@@ -83,7 +87,7 @@ questions.
             <arg value="-F"/>
             <arg value="${javahome}/../.."/>
             <arg value="-isysroot"/>
-            <arg value="/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX10.8.sdk"/>
+            <arg value="${osx.sdk.dir}"/>
             <arg value="-mmacosx-version-min=10.7"/> 
             <arg value="appbundler/native/main.m"/>
         </exec>
