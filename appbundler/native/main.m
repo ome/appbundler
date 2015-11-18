@@ -369,6 +369,16 @@ int launch(char *commandName, int progargc, char *progargv[]) {
         }
     }
     
+    // replace $APP_ROOT in environment variables
+    NSDictionary* environment = [[NSProcessInfo processInfo] environment];
+    for (NSString* key in environment) {
+        NSString* value = [environment objectForKey:key];
+        NSString* newValue = [value stringByReplacingOccurrencesOfString:@APP_ROOT_PREFIX withString:[mainBundle bundlePath]];
+        if (! [newValue isEqualToString:value]) {
+            setenv([key UTF8String], [newValue UTF8String], 1);
+        }
+    }
+
     // Initialize the arguments to JLI_Launch()
     // +5 due to the special directories and the sandbox enabled property
     int argc = 1 + [options count] + [defaultOptions count] + 2 + [arguments count] + 1 + 5 + newProgargc;
