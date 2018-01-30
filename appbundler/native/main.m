@@ -627,6 +627,12 @@ int extractMajorVersion (NSString *vstring)
 {
     if (vstring == nil) { return 0; }
 
+    // Workaround for Java 9 (since Java 9 version string does not start with
+    // 1. any longer)
+    if ([vstring characterAtIndex:(NSUInteger)1] == '9') {
+        return 9;
+    }
+
 //  Expecting either a java version of form 1.X.Y_ZZ or jkd1.X.Y_ZZ.
 //  Strip off everything at start up to and including the "1."
     NSUInteger vstart = [vstring rangeOfString:@"1."].location;
