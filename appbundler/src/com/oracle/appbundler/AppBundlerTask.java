@@ -42,6 +42,7 @@ import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.util.ArrayList;
 import java.util.Iterator;
+import java.util.List;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipInputStream;
 
@@ -76,8 +77,9 @@ public class AppBundlerTask extends Task {
     private String copyright = "";
     private String privileged = null;
     private String workingDirectory = null;
-    private String minimumSystemVersion = null;  
-    private String jvmRequired = "1.7";
+    private String minimumSystemVersion = null;
+
+    private String jvmRequired = null;
     private boolean jrePreferred = false;
     private boolean jdkPreferred = false;
 
@@ -87,9 +89,12 @@ public class AppBundlerTask extends Task {
     private boolean supportsAutomaticGraphicsSwitching = true;
     private boolean hideDockIcon = false;
     private boolean isDebug = false;
+    private boolean ignorePSN = false;
 
     // JVM info properties
     private String mainClassName = null;
+    private String jnlpLauncherName = null;
+    private String jarLauncherName = null;
     private Runtime runtime = null;
     private ArrayList<FileSet> classPath = new ArrayList<>();
     private ArrayList<FileSet> libraryPath = new ArrayList<>();
@@ -98,7 +103,10 @@ public class AppBundlerTask extends Task {
     private ArrayList<String> architectures = new ArrayList<>();
     private ArrayList<String> registeredProtocols = new ArrayList<>();
     private ArrayList<BundleDocument> bundleDocuments = new ArrayList<>();
+    private ArrayList<TypeDeclaration> exportedTypeDeclarations = new ArrayList<>();
+    private ArrayList<TypeDeclaration> importedTypeDeclarations = new ArrayList<>();
     private ArrayList<PlistEntry> plistEntries = new ArrayList<>();
+    private ArrayList<Environment> environments = new ArrayList<>();
 
     private Reference classPathRef;
     private ArrayList<String> plistClassPaths = new ArrayList<>();
@@ -114,7 +122,7 @@ public class AppBundlerTask extends Task {
     private static final String KEY_TAG = "key";
     private static final String ARRAY_TAG = "array";
     private static final String STRING_TAG = "string";
-    
+
     private static final int BUFFER_SIZE = 2048;
 
     public void setOutputDirectory(File outputDirectory) {
@@ -136,9 +144,9 @@ public class AppBundlerTask extends Task {
     public void setIcon(File icon) {
         this.icon = icon;
     }
-    
+
     public void setExecutableName(String executable) {
-    	this.executableName = executable;
+        this.executableName = executable;
     }
 
     public void setShortVersion(String shortVersion) {
@@ -146,7 +154,7 @@ public class AppBundlerTask extends Task {
     }
 
     public void setVersion(String version) {
-        this.version = version;    
+        this.version = version;
     }
 
     public void setSignature(String signature) {
@@ -156,23 +164,23 @@ public class AppBundlerTask extends Task {
     public void setCopyright(String copyright) {
         this.copyright = copyright;
     }
-    
+
     public void setPrivileged(String privileged) {
         this.privileged = privileged;
     }
-    
+
     public void setWorkingDirectory(String workingDirectory) {
         this.workingDirectory = workingDirectory;
     }
-    
+
     public void setJVMRequired(String v){
         this.jvmRequired = v;
     }
-        
+
     public void setJREPreferred(boolean preferred){
         this.jrePreferred = preferred;
     }
-        
+
     public void setJDKPreferred(boolean preferred){
         this.jdkPreferred = preferred;
     }
@@ -180,7 +188,7 @@ public class AppBundlerTask extends Task {
     public void setMinimumSystemVersion(String v){
         this.minimumSystemVersion = v;
     }
-        
+
     public void setApplicationCategory(String applicationCategory) {
         this.applicationCategory = applicationCategory;
     }
@@ -188,11 +196,11 @@ public class AppBundlerTask extends Task {
     public void setHighResolutionCapable(boolean highResolutionCapable) {
         this.highResolutionCapable = highResolutionCapable;
     }
-    
+
     public void setHideDockIcon(boolean hideDock) {
         this.hideDockIcon = hideDock;
     }
-    
+
     public void setDebug(boolean enabled) {
         this.isDebug = enabled;
     }
@@ -201,8 +209,20 @@ public class AppBundlerTask extends Task {
         this.supportsAutomaticGraphicsSwitching = supportsAutomaticGraphicsSwitching;
     }
 
+    public void setIgnorePSN(boolean ignorePSN) {
+        this.ignorePSN = ignorePSN;
+    }
+
     public void setMainClassName(String mainClassName) {
         this.mainClassName = mainClassName;
+    }
+
+    public void setJnlpLauncherName(String jnlpLauncherName) {
+        this.jnlpLauncherName = jnlpLauncherName;
+    }
+
+    public void setJarLauncherName(String jarLauncherName) {
+        this.jarLauncherName = jarLauncherName;
     }
 
     public void addConfiguredRuntime(Runtime runtime) throws BuildException {
@@ -212,9 +232,10 @@ public class AppBundlerTask extends Task {
 
         this.runtime = runtime;
     }
-             
-    public void setClasspathRef(Reference ref) {   
-        this.classPathRef = ref;                                         
+
+    public void setClasspathRef(Reference ref) {
+
+        this.classPathRef = ref;
     }
 
     public void setPlistClassPaths(String plistClassPaths) {
@@ -230,9 +251,23 @@ public class AppBundlerTask extends Task {
     public void addConfiguredLibraryPath(FileSet libraryPath) {
         this.libraryPath.add(libraryPath);
     }
-    
+
     public void addConfiguredBundleDocument(BundleDocument document) {
+        if ((document.getContentTypes() == null) && (document.getExtensions() == null)) {
+            throw new BuildException("Document content type or extension is required.");
+        }
         this.bundleDocuments.add(document);
+    }
+
+    public void addConfiguredTypeDeclaration(TypeDeclaration typeDeclaration) {
+        if (typeDeclaration.getIdentifier() == null) {
+            throw new BuildException("Type declarations must have an identifier.");
+        }
+        if (typeDeclaration.isImported()) {
+            this.importedTypeDeclarations.add(typeDeclaration);
+        } else {
+            this.exportedTypeDeclarations.add(typeDeclaration);
+        }
     }
 
     public void addConfiguredPlistEntry(PlistEntry plistEntry) {
@@ -242,8 +277,22 @@ public class AppBundlerTask extends Task {
         if (plistEntry.getValue() == null) {
             throw new BuildException("Value is required.");
         }
+        if (plistEntry.getType() == null) {
+            plistEntry.setType(STRING_TAG);
+        }
 
         this.plistEntries.add(plistEntry);
+    }
+
+    public void addConfiguredEnvironment(Environment environment) {
+        if (environment.getName() == null) {
+            throw new BuildException("Name is required.");
+        }
+        if (environment.getValue() == null) {
+            throw new BuildException("Value is required.");
+        }
+
+        this.environments.add(environment);
     }
 
     public void addConfiguredOption(Option option) throws BuildException {
@@ -282,7 +331,8 @@ public class AppBundlerTask extends Task {
             throw new BuildException("Name is required.");
         }
 
-        architectures.add(name);   
+        architectures.add(name);
+
     }
 
     @Override
@@ -338,8 +388,8 @@ public class AppBundlerTask extends Task {
             throw new IllegalStateException("Copyright is required.");
         }
 
-        if (mainClassName == null) {
-            throw new IllegalStateException("Main class name is required.");
+        if (jnlpLauncherName == null && mainClassName == null) {
+            throw new IllegalStateException("Main class name or JNLP launcher name is required.");
         }
 
         // Create the app bundle
@@ -384,7 +434,7 @@ public class AppBundlerTask extends Task {
 
             // Copy localized resources to Resources folder
             copyResources(resourcesDirectory);
-            
+
             // Copy runtime to PlugIns folder
             copyRuntime(plugInsDirectory);
 
@@ -392,7 +442,7 @@ public class AppBundlerTask extends Task {
             copyClassPathEntries(javaDirectory);
 
             // Copy class path ref entries to Java folder
-            copyClassPathRefEntries(javaDirectory);            
+            copyClassPathRefEntries(javaDirectory);
 
             // Copy library path entries to MacOS folder
             copyLibraryPathEntries(macOSDirectory);
@@ -401,18 +451,15 @@ public class AppBundlerTask extends Task {
             copyIcon(resourcesDirectory);
 
             // Copy app document icons to Resources folder
-            for(BundleDocument bundleDocument: bundleDocuments) {
-                if(bundleDocument.hasIcon()) {
-                    File ifile = bundleDocument.getIconFile();
-                    if (ifile != null) {
-                        copyDocumentIcon(ifile,resourcesDirectory); }
-                }
-            }
+            copyDocumentIcons(bundleDocuments, resourcesDirectory);
+            copyDocumentIcons(exportedTypeDeclarations, resourcesDirectory);
+            copyDocumentIcons(importedTypeDeclarations, resourcesDirectory);
+
         } catch (IOException exception) {
             throw new BuildException(exception);
         }
     }
-    
+
     private void copyResources(File resourcesDirectory) throws IOException {
         // Unzip res.zip into resources directory
         InputStream inputStream = getClass().getResourceAsStream("res.zip");
@@ -457,9 +504,10 @@ public class AppBundlerTask extends Task {
 
     private void copyClassPathRefEntries(File javaDirectory) throws IOException {
         if(classPathRef != null) {
-            org.apache.tools.ant.types.Path classpath = 
+            org.apache.tools.ant.types.Path classpath =
+
                     (org.apache.tools.ant.types.Path) classPathRef.getReferencedObject(getProject());
-            
+
             Iterator<FileResource> iter = (Iterator<FileResource>)(Object)classpath.iterator();
             while(iter.hasNext()) {
                 FileResource resource = iter.next();
@@ -508,8 +556,20 @@ public class AppBundlerTask extends Task {
         }
     }
 
+    public void copyDocumentIcons(final ArrayList<? extends IconContainer> iconContainers,
+            File resourcesDirectory) throws IOException {
+        for(IconContainer iconContainer: iconContainers) {
+            if(iconContainer.hasIcon()) {
+                File ifile = iconContainer.getIconFile();
+                if (ifile != null) {
+                    copyDocumentIcon(ifile,resourcesDirectory);
+                }
+            }
+        }
+    }
+
     private void copyDocumentIcon(File ifile, File resourcesDirectory) throws IOException {
-        if (icon == null) {
+        if (ifile == null) {
             return;
         } else {
             copy(ifile, new File(resourcesDirectory, ifile.getName()));
@@ -553,45 +613,24 @@ public class AppBundlerTask extends Task {
             writeProperty(xout, "CFBundleVersion", version);
             writeProperty(xout, "CFBundleSignature", signature);
             writeProperty(xout, "NSHumanReadableCopyright", copyright);
-            if ( minimumSystemVersion != null ){
-                writeProperty(xout, "LSMinimumSystemVersion", minimumSystemVersion);
-            }
-            if (applicationCategory != null) {
-                writeProperty(xout, "LSApplicationCategoryType", applicationCategory);
-            }
-            if(hideDockIcon){
-                writeKey(xout, "LSUIElement");
-                writeBoolean(xout, true); 
-                xout.writeCharacters("\n");
-            }
-            if (highResolutionCapable) {
-                writeKey(xout, "NSHighResolutionCapable");
-                writeBoolean(xout, true); 
-                xout.writeCharacters("\n");
-            }
+            writeProperty(xout, "LSMinimumSystemVersion", minimumSystemVersion);
+            writeProperty(xout, "LSApplicationCategoryType", applicationCategory);
+            writeProperty(xout, "LSUIElement",hideDockIcon);
+            writeProperty(xout, "NSHighResolutionCapable",highResolutionCapable);
+            writeProperty(xout, "NSSupportsAutomaticGraphicsSwitching",
+                        supportsAutomaticGraphicsSwitching);
+            writeProperty(xout, "IgnorePSN",ignorePSN);
 
-            if (supportsAutomaticGraphicsSwitching) {
-                writeKey(xout, "NSSupportsAutomaticGraphicsSwitching");
-                writeBoolean(xout, true); 
-                xout.writeCharacters("\n");
-            }
             if(registeredProtocols.size() > 0){
                 writeKey(xout, "CFBundleURLTypes");
                 xout.writeStartElement(ARRAY_TAG);
                 xout.writeCharacters("\n");
                 xout.writeStartElement(DICT_TAG);
                 xout.writeCharacters("\n");
-                
+
                 writeProperty(xout, "CFBundleURLName", identifier);
-                writeKey(xout, "CFBundleURLSchemes");
-                xout.writeStartElement(ARRAY_TAG);
-                xout.writeCharacters("\n");
-                for(String scheme:registeredProtocols){
-                    writeString(xout, scheme);
-                }
-                xout.writeEndElement();
-                xout.writeCharacters("\n");
-                
+                writeStringArray(xout, "CFBundleURLSchemes",registeredProtocols);
+
                 xout.writeEndElement();
                 xout.writeCharacters("\n");
                 xout.writeEndElement();
@@ -602,112 +641,51 @@ public class AppBundlerTask extends Task {
             if (runtime != null) {
                 writeProperty(xout, "JVMRuntime", runtime.getDir().getParentFile().getParentFile().getName());
             }
-            
-            if ( jvmRequired != null ) {
+
+            if(jvmRequired != null) {
                 writeProperty(xout, "JVMVersion", jvmRequired);
             }
-            
-            if ( privileged != null ) {
-                writeProperty(xout, "JVMRunPrivileged", privileged);
-            }
-            
-            if ( jrePreferred ) {
-                writeKey(xout, "JREPreferred");
-                writeBoolean(xout, true); 
-                xout.writeCharacters("\n");
-            }
-            if ( jdkPreferred ) {
-                writeKey(xout, "JDKPreferred");
-                writeBoolean(xout, true); 
-                xout.writeCharacters("\n");
-            }
 
-            if ( workingDirectory != null ) {
-                writeProperty(xout, "WorkingDirectory", workingDirectory);
-            }
+            writeProperty(xout, "JVMRunPrivileged", privileged);
 
-            // Write main class name
+            writeProperty(xout, "JREPreferred", jrePreferred);
+            writeProperty(xout, "JDKPreferred", jdkPreferred);
+
+            writeProperty(xout, "WorkingDirectory", workingDirectory);
+
+            // Write jnlp launcher name - only if set
+            writeProperty(xout, "JVMJNLPLauncher", jnlpLauncherName);
+
+            // Write main class name - only if set. There should only one be set
             writeProperty(xout, "JVMMainClassName", mainClassName);
 
            // Write classpaths in plist, if specified
             if (!plistClassPaths.isEmpty()) {
-                writeKey(xout, "JVMClassPath");
-                xout.writeStartElement(ARRAY_TAG);
-                xout.writeCharacters("\n");
-                for (String cp : plistClassPaths) {
-                    writeString(xout, cp);
-                }
-                xout.writeEndElement();
-                xout.writeCharacters("\n");
+                writeStringArray(xout,"JVMClassPath", plistClassPaths);
             }
 
             // Write whether launcher be verbose with debug msgs
-            if (isDebug) {
-                writeKey(xout, "JVMDebug");
-                writeBoolean(xout, isDebug);
-                xout.writeCharacters("\n");
-            }
+            writeProperty(xout, "JVMDebug", isDebug);
+
+            // Write jar launcher name
+            writeProperty(xout, "JVMJARLauncher", jarLauncherName);
 
             // Write CFBundleDocument entries
             writeKey(xout, "CFBundleDocumentTypes");
-            
-            xout.writeStartElement(ARRAY_TAG);
-            xout.writeCharacters("\n");
-            
-            for(BundleDocument bundleDocument: bundleDocuments) {
-                xout.writeStartElement(DICT_TAG);
-                xout.writeCharacters("\n");
-                
-                writeKey(xout, "CFBundleTypeExtensions");
-                xout.writeStartElement(ARRAY_TAG);
-                xout.writeCharacters("\n");
-                for(String extension : bundleDocument.getExtensions()) {
-                    writeString(xout, extension);
-                }
-                xout.writeEndElement();
-                xout.writeCharacters("\n");
-                
-                if(bundleDocument.hasIcon()) {
-                    writeKey(xout, "CFBundleTypeIconFile");
+            writeBundleDocuments(xout, bundleDocuments);
 
-                    File ifile = bundleDocument.getIconFile();
-                    
-                    if (ifile != null) {
-                        writeString(xout, ifile.getName());
-                    }
-                    else {
-                        writeString(xout, bundleDocument.getIcon());
-                    }
-                }
-                
-                writeKey(xout, "CFBundleTypeName");
-                writeString(xout, bundleDocument.getName());
-                    
-                writeKey(xout, "CFBundleTypeRole");
-                writeString(xout, bundleDocument.getRole());
-                
-                writeKey(xout, "LSTypeIsPackage");
-                writeBoolean(xout, bundleDocument.isPackage());
-                
-                xout.writeEndElement();
-                xout.writeCharacters("\n");
+            // Write Type Declarations
+            if (! exportedTypeDeclarations.isEmpty()) {
+                writeKey(xout, "UTExportedTypeDeclarations");
+                writeTypeDeclarations(xout, exportedTypeDeclarations);
             }
-            
-            xout.writeEndElement();
-            xout.writeCharacters("\n");
-            
+            if (! importedTypeDeclarations.isEmpty()) {
+                writeKey(xout, "UTImportedTypeDeclarations");
+                writeTypeDeclarations(xout, importedTypeDeclarations);
+            }
+
             // Write architectures
-            writeKey(xout, "LSArchitecturePriority");
-
-            xout.writeStartElement(ARRAY_TAG);
-            xout.writeCharacters("\n");
-
-            for (String architecture : architectures) {
-                writeString(xout, architecture);
-            }
-
-            xout.writeEndElement();
-            xout.writeCharacters("\n");
+            writeStringArray(xout, "LSArchitecturePriority",architectures);
 
             // Write Environment
             writeKey(xout, "LSEnvironment");
@@ -715,6 +693,11 @@ public class AppBundlerTask extends Task {
             xout.writeCharacters("\n");
             writeKey(xout, "LC_CTYPE");
             writeString(xout, "UTF-8");
+
+            for (Environment environment : environments) {
+                writeProperty(xout, environment.getName(), environment.getValue());
+            }
+
             xout.writeEndElement();
             xout.writeCharacters("\n");
 
@@ -739,8 +722,7 @@ public class AppBundlerTask extends Task {
 
             for (Option option : options) {
                 if (option.getName() != null) {
-                    writeKey(xout, option.getName());
-                    writeString(xout, option.getValue());
+                    writeProperty(xout, option.getName(), option.getValue());
                 }
             }
 
@@ -748,22 +730,12 @@ public class AppBundlerTask extends Task {
             xout.writeCharacters("\n");
 
             // Write arguments
-            writeKey(xout, "JVMArguments");
-
-            xout.writeStartElement(ARRAY_TAG);
-            xout.writeCharacters("\n");
-
-            for (String argument : arguments) {
-                writeString(xout, argument);
-            }
-
-            xout.writeEndElement();
-            xout.writeCharacters("\n");
+            writeStringArray(xout, "JVMArguments",arguments);
 
             // Write arbitrary key-value pairs
             for (PlistEntry item : plistEntries) {
                 writeKey(xout, item.getKey());
-                writeString(xout, item.getValue());
+                writeValue(xout, item.getType(), item.getValue());
             }
 
             // End root dictionary
@@ -793,22 +765,133 @@ public class AppBundlerTask extends Task {
         xout.writeCharacters("\n");
     }
 
+    private void writeValue(XMLStreamWriter xout, String type, String value) throws XMLStreamException {
+        if (type == null) {
+            type = STRING_TAG;
+        }
+        if ("boolean".equals(type)) {
+            writeBoolean(xout, "true".equals(value));
+        } else {
+            xout.writeStartElement(type);
+            xout.writeCharacters(value);
+            xout.writeEndElement();
+            xout.writeCharacters("\n");
+        }
+    }
+
     private void writeString(XMLStreamWriter xout, String value) throws XMLStreamException {
         xout.writeStartElement(STRING_TAG);
         xout.writeCharacters(value);
         xout.writeEndElement();
         xout.writeCharacters("\n");
     }
-    
+
     private void writeBoolean(XMLStreamWriter xout, boolean value) throws XMLStreamException {
         xout.writeEmptyElement(value ? "true" : "false");
+        xout.writeCharacters("\n");
     }
 
-    private void writeProperty(XMLStreamWriter xout, String key, String value) throws XMLStreamException {
-        writeKey(xout, key);
-        writeString(xout, value);
+    private void writeProperty(XMLStreamWriter xout, String key, Boolean value) throws XMLStreamException {
+        if (value != null && value) {
+            writeKey(xout, key);
+            writeBoolean(xout, true);
+        }
     }
 
+    private void writeProperty(XMLStreamWriter xout, String key, Object value) throws XMLStreamException {
+        if (value != null) {
+            writeKey(xout, key);
+            writeString(xout, value.toString());
+        }
+    }
+
+    public void writeStringArray(XMLStreamWriter xout, final String key,
+            final Iterable<String> values) throws XMLStreamException {
+        if (values != null) {
+            writeKey(xout, key);
+            xout.writeStartElement(ARRAY_TAG);
+            xout.writeCharacters("\n");
+            for(String singleValue : values) {
+                writeString(xout, singleValue);
+            }
+            xout.writeEndElement();
+            xout.writeCharacters("\n");
+        }
+    }
+
+    public void writeBundleDocuments(XMLStreamWriter xout,
+            final ArrayList<BundleDocument> bundleDocuments) throws XMLStreamException {
+
+        xout.writeStartElement(ARRAY_TAG);
+        xout.writeCharacters("\n");
+
+        for(BundleDocument bundleDocument: bundleDocuments) {
+            xout.writeStartElement(DICT_TAG);
+            xout.writeCharacters("\n");
+
+            final List<String> contentTypes = bundleDocument.getContentTypes();
+            if (contentTypes != null) {
+                writeStringArray(xout, "LSItemContentTypes", contentTypes);
+            } else {
+                writeStringArray(xout, "CFBundleTypeExtensions", bundleDocument.getExtensions());
+                writeProperty(xout, "LSTypeIsPackage", bundleDocument.isPackage());
+            }
+            writeStringArray(xout, "NSExportableTypes", bundleDocument.getExportableTypes());
+
+            final File ifile = bundleDocument.getIconFile();
+            writeProperty(xout, "CFBundleTypeIconFile", ifile != null ?
+                        ifile.getName() : bundleDocument.getIcon());
+
+            writeProperty(xout, "CFBundleTypeName", bundleDocument.getName());
+            writeProperty(xout, "CFBundleTypeRole", bundleDocument.getRole());
+            writeProperty(xout, "LSHandlerRank", bundleDocument.getHandlerRank());
+
+            xout.writeEndElement();
+            xout.writeCharacters("\n");
+        }
+
+        xout.writeEndElement();
+        xout.writeCharacters("\n");
+    }
+
+    public void writeTypeDeclarations(XMLStreamWriter xout,
+            final ArrayList<TypeDeclaration> typeDeclarations) throws XMLStreamException {
+        xout.writeStartElement(ARRAY_TAG);
+        xout.writeCharacters("\n");
+        for (TypeDeclaration typeDeclaration: typeDeclarations) {
+
+            xout.writeStartElement(DICT_TAG);
+            xout.writeCharacters("\n");
+
+            writeProperty(xout, "UTTypeIdentifier", typeDeclaration.getIdentifier());
+            writeProperty(xout, "UTTypeReferenceURL", typeDeclaration.getReferenceUrl());
+            writeProperty(xout, "UTTypeDescription", typeDeclaration.getDescription());
+
+            final File ifile = typeDeclaration.getIconFile();
+            writeProperty(xout, "UTTypeIconFile", ifile != null ?
+                        ifile.getName() : typeDeclaration.getIcon());
+
+            writeStringArray(xout, "UTTypeConformsTo", typeDeclaration.getConformsTo());
+
+            writeKey(xout, "UTTypeTagSpecification");
+
+            xout.writeStartElement(DICT_TAG);
+            xout.writeCharacters("\n");
+
+            writeStringArray(xout, "com.apple.ostype", typeDeclaration.getOsTypes());
+            writeStringArray(xout, "public.filename-extension", typeDeclaration.getExtensions());
+            writeStringArray(xout, "public.mime-type", typeDeclaration.getMimeTypes());
+
+            xout.writeEndElement();
+            xout.writeCharacters("\n");
+
+            xout.writeEndElement();
+            xout.writeCharacters("\n");
+        }
+
+        xout.writeEndElement();
+        xout.writeCharacters("\n");
+    }
     private void writePkgInfo(File file) throws IOException {
         Writer out = new BufferedWriter(new FileWriter(file));
 
@@ -853,9 +936,9 @@ public class AppBundlerTask extends Task {
 
         destination.getParentFile().mkdirs();
 
-        Files.copy(sourcePath, destinationPath, StandardCopyOption.REPLACE_EXISTING, LinkOption.NOFOLLOW_LINKS);
+        Files.copy(sourcePath, destinationPath, StandardCopyOption.REPLACE_EXISTING);
 
-        if (Files.isDirectory(sourcePath, LinkOption.NOFOLLOW_LINKS)) {
+        if (Files.isDirectory(sourcePath)) {
             String[] files = source.list();
 
             for (int i = 0; i < files.length; i++) {
