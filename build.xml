@@ -89,6 +89,8 @@ questions.
             <arg value="-isysroot"/>
             <arg value="${osx.sdk.dir}"/>
             <arg value="-mmacosx-version-min=10.7"/> 
+            <arg value="-fobjc-exceptions"/>
+            <arg value="-std=c99"/>
             <arg value="appbundler/native/main.m"/>
         </exec>
     </target>
@@ -128,6 +130,7 @@ questions.
             classpath="${ant.project.name}/${folder.bin}/${ant.project.name}-${version}.jar"/>
 
         <bundleapp outputdirectory="."
+            debug="true"
             name="Test"
             displayname="Test"
             identifier="com.oracle.javafx.swing.Test"
@@ -135,7 +138,7 @@ questions.
             applicationCategory="public.app-category.developer-tools"
             mainclassname="com/javafx/main/Main">
             <runtime dir="${env.JAVA_HOME}"/>
-            <classpath file="${user.home}/bin/javafx-samples-2.2.0/SwingInterop.jar"/>
+            <classpath file="${ant.project.name}/SwingInterop.jar"/>
             <option value="-Dapple.laf.useScreenMenuBar=true"/>
             <argument value="foo=bar"/>
         </bundleapp>
@@ -146,13 +149,14 @@ questions.
             classpath="${ant.project.name}/${folder.bin}/${ant.project.name}-${version}.jar"/>
 
         <bundleapp outputdirectory="."
+            debug="true"
             name="TestPlugin"
             displayname="Test (Plugin)"
             identifier="com.oracle.javafx.swing.TestPlugin"
             shortversion="1.0"
             applicationCategory="public.app-category.developer-tools"
             mainclassname="com/javafx/main/Main">
-            <classpath file="${user.home}/bin/javafx-samples-2.2.0/SwingInterop.jar"/>
+            <classpath file="${ant.project.name}/SwingInterop.jar"/>
             <option value="-Dapple.laf.useScreenMenuBar=true"/>
             <argument value="foo=bar"/>
         </bundleapp>
