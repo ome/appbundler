@@ -1,5 +1,0 @@
-language: objective-c
-
-install: brew install ant
-
-script: ant clean compile package
